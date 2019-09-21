@@ -15,6 +15,7 @@ describe "HttpController", ->
 			"logger-sharelatex": @logger = { log: sinon.stub(), error: sinon.stub() }
 			"./HealthChecker": {}
 		@res = { send: sinon.stub(), json: sinon.stub(), setHeader:sinon.stub() }
+		@res.status = sinon.stub().returns(@res)
 		@req = { query:{}}
 		@next = sinon.stub()
 		@project_id = "mock-project-id"
@@ -292,6 +293,20 @@ describe "HttpController", ->
 					.calledWith(400)
 					.should.equal true
 
+		describe "when the doc body is too large", ->
+			beforeEach ->
+				@req.body =
+					lines: @lines = Array(2049).fill('a'.repeat(1024))
+					version: @version = 42
+					ranges: @ranges = { changes: "mock" }
+				@HttpController.updateDoc @req, @res, @next
+
+			it "should return a 413 (too large) response", ->
+				sinon.assert.calledWith(@res.status, 413)
+
+			it "should report that the document body is too large", ->
+				sinon.assert.calledWith(@res.send, "document body too large")
+
 	describe "deleteDoc", ->
 		beforeEach ->
 			@req.params =
@@ -326,3 +341,17 @@ describe "HttpController", ->
 			@res.send
 				.calledWith(204)
 				.should.equal true
+
+	describe "destroyAllDocs", ->
+		beforeEach ->
+			@req.params =
+				project_id: @project_id
+			@DocArchiveManager.destroyAllDocs = sinon.stub().callsArg(1)
+			@HttpController.destroyAllDocs @req, @res, @next
+
+		it "should destroy the docs", ->
+			sinon.assert.calledWith(@DocArchiveManager.destroyAllDocs, @project_id)
+
+		it "should return 204", ->
+			sinon.assert.calledWith(@res.send, 204)
+

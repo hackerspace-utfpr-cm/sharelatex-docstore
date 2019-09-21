@@ -1,19 +1,22 @@
+Metrics    = require "metrics-sharelatex"
+Metrics.initialize("docstore")
 Settings   = require "settings-sharelatex"
 logger     = require "logger-sharelatex"
 express    = require "express"
 bodyParser = require "body-parser"
 Errors     = require "./app/js/Errors"
 HttpController = require "./app/js/HttpController"
-Metrics    = require "metrics-sharelatex"
 Path       = require "path"
 
-Metrics.initialize("docstore")
+
 logger.initialize("docstore")
 Metrics.event_loop?.monitor(logger)
 
 app = express()
 
 app.use Metrics.http.monitor(logger)
+
+Metrics.injectMetricsRoute(app)
 
 app.param 'project_id', (req, res, next, project_id) ->
 	if project_id?.match /^[0-9a-f]{24}$/
@@ -27,16 +30,19 @@ app.param 'doc_id', (req, res, next, doc_id) ->
 	else
 		next new Error("invalid doc id")
 
+Metrics.injectMetricsRoute(app)
+
 app.get  '/project/:project_id/doc', HttpController.getAllDocs
 app.get  '/project/:project_id/ranges', HttpController.getAllRanges
 app.get  '/project/:project_id/doc/:doc_id', HttpController.getDoc
 app.get  '/project/:project_id/doc/:doc_id/raw', HttpController.getRawDoc
-# Add 64kb overhead for the JSON encoding
-app.post '/project/:project_id/doc/:doc_id', bodyParser.json(limit: Settings.max_doc_length + 64 * 1024), HttpController.updateDoc
+# Add 64kb overhead for the JSON encoding, and double the size to allow for ranges in the json payload
+app.post '/project/:project_id/doc/:doc_id', bodyParser.json(limit: (Settings.max_doc_length + 64 * 1024) * 2), HttpController.updateDoc
 app.del  '/project/:project_id/doc/:doc_id', HttpController.deleteDoc
 
 app.post  '/project/:project_id/archive', HttpController.archiveAllDocs
 app.post  '/project/:project_id/unarchive', HttpController.unArchiveAllDocs
+app.post  '/project/:project_id/destroy', HttpController.destroyAllDocs
 
 app.get "/health_check",  HttpController.healthCheck
 
@@ -44,7 +50,7 @@ app.get '/status', (req, res)->
 	res.send('docstore is alive')
 
 app.use (error, req, res, next) ->
-	logger.error err: error, "request errored"
+	logger.error err: error, req:req, "request errored"
 	if error instanceof Errors.NotFoundError
 		res.send 404
 	else
@@ -52,6 +58,10 @@ app.use (error, req, res, next) ->
 
 port = Settings.internal.docstore.port
 host = Settings.internal.docstore.host
-app.listen port, host, (error) ->
-	throw error if error?
-	logger.info "Docstore starting up, listening on #{host}:#{port}"
+
+if !module.parent # Called directly
+	app.listen port, host, (error) ->
+		throw error if error?
+		logger.info "Docstore starting up, listening on #{host}:#{port}"
+
+module.exports = app

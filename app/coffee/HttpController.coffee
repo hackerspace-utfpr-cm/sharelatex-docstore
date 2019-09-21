@@ -2,6 +2,7 @@ DocManager = require "./DocManager"
 logger = require "logger-sharelatex"
 DocArchive = require "./DocArchiveManager"
 HealthChecker = require "./HealthChecker"
+Settings   = require "settings-sharelatex"
 
 
 module.exports = HttpController =
@@ -68,6 +69,15 @@ module.exports = HttpController =
 			res.send 400 # Bad Request
 			return
 
+		bodyLength = lines.reduce(
+			(len, line) => line.length + len
+			0
+		)
+		if bodyLength > Settings.max_doc_length
+			logger.error project_id: project_id, doc_id: doc_id, bodyLength: bodyLength, "document body too large"
+			res.status(413).send("document body too large")
+			return
+
 		logger.log project_id: project_id, doc_id: doc_id, "got http request to update doc"
 		DocManager.updateDoc project_id, doc_id, lines, version, ranges, (error, modified, rev) ->
 			return next(error) if error?
@@ -116,6 +126,13 @@ module.exports = HttpController =
 		DocArchive.unArchiveAllDocs project_id, (error) ->
 			return next(error) if error?
 			res.send 200
+
+	destroyAllDocs: (req, res, next = (error) ->) ->
+		project_id = req.params.project_id
+		logger.log project_id: project_id, "destroying all docs"
+		DocArchive.destroyAllDocs project_id, (error) ->
+			return next(error) if error?
+			res.send 204
 
 	healthCheck: (req, res)->
 		HealthChecker.check (err)->
